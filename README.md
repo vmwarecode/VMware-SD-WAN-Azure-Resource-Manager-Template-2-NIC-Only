@@ -1,0 +1,1 @@
+# VMware-SD-WAN-Azure-Resource-Manager-Template-2-NIC-Only
