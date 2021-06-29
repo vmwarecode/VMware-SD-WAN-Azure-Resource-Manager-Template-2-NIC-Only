@@ -1,0 +1,437 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "virtualMachineSize": {
+            "type": "string",
+            "defaultValue": "Standard_D2d_v4",
+            "metadata": {
+                "description": "Virtual machine size"
+            }
+        },
+        "EdgeVersion": {
+            "type": "string",
+            "allowedValues": [
+                "Virtual Edge 4.2.1"
+            ],
+            "defaultValue": "Virtual Edge 4.2.1",
+            "metadata": {
+                "description": "The version of the Edge to deploy from Marketplace"
+            }
+        },
+        "VCO": {
+            "type": "string",
+            "defaultValue": "TargetVCO",
+            "metadata": {
+                "description": "FQDN or IP address of VCO"
+            }
+        },
+        "IgnoreCertErrors": {
+            "type": "string",
+            "allowedValues": [
+                "true",
+                "false"
+            ],
+            "defaultValue": "false",
+            "metadata": {
+                "description": "Determines whether or not to ignore certificate errors"
+            }
+        },
+        "ActivationKey": {
+            "type": "string",
+            "defaultValue": "XXXX-XXXX-XXXX-XXXX",
+            "metadata": {
+                "description": "Activation Key"
+            }
+        },
+        "EdgeName": {
+            "type": "string",
+            "defaultValue": "VMware-SDWAN-Edge",
+            "metadata": {
+                "description": "Name of the Virtual Edge"
+            }
+        },
+        "SslPublicKey": {
+            "type": "string",
+            "metadata": {
+                "description": "The Public Key for Virtual Edge Instance paired with local private key"
+            }
+        },
+        "virtualNetworkNewOrExisting": {
+            "type": "string",
+            "allowedValues": [
+                "new",
+                "existing"
+            ],
+            "defaultValue": "new",
+            "metadata": {
+                "description": "Determines whether or not a new virtual network should be provisioned."
+            }
+        },
+        "vNetName": {
+            "type": "string",
+            "defaultValue": "AzureVNET",
+            "metadata": {
+              "description": "Virtual Network Name"
+            }
+        },
+        "vNetPrefix": {
+            "type": "string",
+            "defaultValue": "172.16.0.0/16",
+            "metadata": {
+              "description": "Virtual Network IP Address Space"
+            }
+        },
+        "PublicSubnetName": {
+            "type": "string",
+            "defaultValue": "Public_SN",
+            "metadata": {
+              "description": "Public Subnet Name for Edge WAN Interface within vNET"
+            }
+        },
+        "PublicSubnet": {
+            "type": "string",
+            "defaultValue": "172.16.0.0/24",
+            "metadata": {
+              "description": "Public Subnet IP Range for Edge WAN Interface"
+            }
+        },
+        "PrivateSubnetName": {
+            "type": "string",
+            "defaultValue": "Private_SN",
+            "metadata": {
+              "description": "Private Subnet Name for Edge LAN Interface witin vNET"
+            }
+        },
+        "PrivateSubnet": {
+            "type": "string",
+            "defaultValue": "172.16.1.0/24",
+            "metadata": {
+              "description": "Private Subnet for Edge LAN Interface"
+            }
+        },
+        "EdgeGE2LANIP": {
+          "type": "string",
+          "defaultValue": "172.16.1.4",
+          "metadata": {
+            "description": "IP Address used for Edge LAN Interface GE2"
+          }
+        }
+    },
+    "variables": {
+        "virtualMachineName": "[parameters('EdgeName')]",
+        "nic1": "[concat(parameters('EdgeName'),'-nic-ge1')]",
+        "nic2": "[concat(parameters('EdgeName'),'-nic-ge2')]",
+        "ipGE1": "[concat(parameters('EdgeName'),'-ipconfig-ge1')]",
+        "ipGE2": "[concat(parameters('EdgeName'),'-ipconfig-ge2')]",
+        "publicIP": "[concat(parameters('EdgeName'),'-publicIP')]",
+        "virtualNetworkName": "[parameters('vNetName')]",
+        "subnet1Name": "[parameters('PublicSubnetName')]",
+        "subnet2Name": "[parameters('PrivateSubnetName')]",
+        "vNetPrefixSpace": "[parameters('vNetPrefix')]",
+        "PublicSubnetSpace": "[parameters('PublicSubnet')]",
+        "PrivateSubnetSpace": "[parameters('PrivateSubnet')]",
+        "PrivateSubnetStartAddress": "[parameters('EdgeGE2LANIP')]",
+        "routeTablePublic": "[concat(parameters('vNetName'),'-PUB-RT')]",
+        "routeTablePrivate": "[concat(parameters('vNetName'),'-PRI-RT')]",
+        "subnet1Ref": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnet1Name'))]",
+        "subnet2Ref": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnet2Name'))]",
+        "networkSecurityGroupName": "VELO_vVCE_SG",
+        "sshKeyPath": "[concat('/home/azureuser/.ssh/authorized_keys')]",
+        "sshPubKey": "parameters('SslPublicKey')",
+        "cloudinit": "[concat('#cloud-config\npassword: Velocloud123\nchpasswd: { expire: False }\nssh_pwauth: True\nvelocloud:\n vce:\n  management_interface: false\n  vco: ',parameters('VCO'), '\n  activation_code: ',parameters('ActivationKey'), '\n  vco_ignore_cert_errors: ', parameters('IgnoreCertErrors'),'\n')]",
+        "images": {
+            "Virtual Edge 4.2.1": {
+                "publisher": "vmware-inc",
+                "offer": "sol-42222-bbj",
+                "sku": "vmware_sdwan_4x",
+                "version": "4.2.1"
+            }
+        },
+        "imageSku": "[variables('images')[parameters('EdgeVersion')].sku]",
+        "imagePublisher": "[variables('images')[parameters('EdgeVersion')].publisher]",
+        "imageOffer": "[variables('images')[parameters('EdgeVersion')].offer]",
+        "imageVersion": "[variables('images')[parameters('EdgeVersion')].version]"
+    },
+    "resources": [
+        {
+            "name": "[variables('virtualMachineName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2017-03-30",
+            "location": "[resourceGroup().location]",
+            "plan": {
+                "publisher": "[variables('imagePublisher')]",
+                "product": "[variables('imageOffer')]",
+                "name": "[variables('imageSku')]"
+            },
+            "comments": "VMware SD-WAN by VeloCloud",
+            "dependsOn": [
+                "[variables('nic1')]",
+                "[variables('nic2')]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('virtualMachineSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('virtualMachineName')]",
+                    "adminUsername": "azureuser",
+                    "adminPassword": "Velocloud123",
+                    "customData": "[base64(variables('cloudinit'))]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": false,
+                        "ssh": {
+                            "publicKeys": [
+                                {
+                                "path": "[variables('sshKeyPath')]",
+                                "keyData": "[parameters('SslPublicKey')]"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[variables('imageSku')]",
+                        "version": "[variables('imageVersion')]"
+                    },
+                    "osDisk": {
+                        "createOption": "FromImage"
+                    },
+                    "dataDisks": []
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "properties": {
+                                "primary": true
+                            },
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic1'))]"
+                        },
+                        {
+                            "properties": {
+                                "primary": false
+                            },
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic2'))]"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "condition": "[equals(parameters('virtualNetworkNewOrExisting'), 'new')]",
+            "name": "[variables('virtualNetworkName')]",
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2017-06-01",
+            "location": "[resourceGroup().location]",
+            "comments": "Deploy Virtual Network",
+            "dependsOn": [
+                "[variables('routeTablePublic')]",
+                "[variables('routeTablePrivate')]"
+            ],
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('vNetPrefixSpace')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('subnet1Name')]",
+                        "properties": {
+                            "addressPrefix": "[variables('PublicSubnetSpace')]",
+                            "routeTable": {
+                                "id": "[resourceId('Microsoft.Network/routeTables', variables('routeTablePublic'))]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "[variables('subnet2Name')]",
+                        "properties": {
+                            "addressPrefix": "[variables('PrivateSubnetSpace')]",
+                            "routeTable": {
+                                "id": "[resourceId('Microsoft.Network/routeTables', variables('routeTablePrivate'))]"
+                            }
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[variables('nic1')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2017-06-01",
+            "location": "[resourceGroup().location]",
+            "comments": "VeloCloud GE1 - WAN.",
+            "dependsOn": [
+                "[variables('networkSecurityGroupName')]",
+                "[variables('virtualNetworkName')]"
+            ],
+            "properties": {
+                "enableIPForwarding": true,
+                "ipConfigurations": [
+                    {
+                        "name":  "[variables('ipGE1')]",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnet1Ref')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIpAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIpAddresses', variables('publicIP'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName'))]"
+                }
+            }
+        },
+        {
+            "name": "[variables('nic2')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2017-06-01",
+            "location": "[resourceGroup().location]",
+            "comments": "VeloCloud GE2 - LAN.",
+            "dependsOn": [
+                "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+                "[variables('publicIP')]"
+            ],
+            "properties": {
+                "enableIPForwarding": true,
+                "ipConfigurations": [
+                    {
+                        "name": "[variables('ipGE2')]",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnet2Ref')]"
+                            },
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[variables('PrivateSubnetStartAddress')]"
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName'))]"
+                }
+            }
+        },
+        {
+            "name": "[variables('publicIP')]",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "apiVersion": "2017-06-01",
+            "location": "[resourceGroup().location]",
+            "comments": "Public IP for WAN Interface GE2",
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic"
+            }
+        },
+        {
+            "condition": "[equals(parameters('virtualNetworkNewOrExisting'), 'new')]",
+            "type": "Microsoft.Network/routeTables",
+            "name": "[variables('routeTablePublic')]",
+            "apiVersion": "2015-06-15",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "routes": [
+                    {
+                        "name": "DefaultRouteToInternet",
+                        "properties": {
+                            "addressPrefix": "0.0.0.0/0",
+                            "nextHopType": "Internet"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "condition": "[equals(parameters('virtualNetworkNewOrExisting'), 'new')]",
+            "type": "Microsoft.Network/routeTables",
+            "name": "[variables('routeTablePrivate')]",
+            "apiVersion": "2015-06-15",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "routes": [
+                    {
+                        "name": "RFC1918_10_ToGE2",
+                        "properties": {
+                            "addressPrefix": "10.0.0.0/8",
+                            "nextHopType": "VirtualAppliance",
+                            "nextHopIpAddress": "[variables('PrivateSubnetStartAddress')]"
+                        }
+                    },
+                    {
+                        "name": "RFC1918_172_16_ToGE2",
+                        "properties": {
+                            "addressPrefix": "172.16.0.0/12",
+                            "nextHopType": "VirtualAppliance",
+                            "nextHopIpAddress": "[variables('PrivateSubnetStartAddress')]"
+                        }
+                    },
+                    {
+                        "name": "RFC1918_192_168_ToGE2",
+                        "properties": {
+                            "addressPrefix": "192.168.0.0/16",
+                            "nextHopType": "VirtualAppliance",
+                            "nextHopIpAddress": "[variables('PrivateSubnetStartAddress')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[variables('networkSecurityGroupName')]",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2016-09-01",
+            "location": "[resourceGroup().location]",
+            "comments": "Network Security Group (NSG)",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "VCMP",
+                        "properties": {
+                            "priority": 1000,
+                            "sourceAddressPrefix": "*",
+                            "protocol": "Udp",
+                            "destinationPortRange": "2426",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*"
+                        }
+                    },
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "priority": 1001,
+                            "sourceAddressPrefix": "*",
+                            "protocol": "Tcp",
+                            "destinationPortRange": "22",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*"
+                        }
+                    },
+                    {
+                        "name": "SNMP",
+                        "properties": {
+                            "priority": 1002,
+                            "sourceAddressPrefix": "*",
+                            "protocol": "Udp",
+                            "destinationPortRange": "161",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*"
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "outputs": {}
+}
