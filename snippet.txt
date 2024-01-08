@@ -12,9 +12,10 @@
         "EdgeVersion": {
             "type": "string",
             "allowedValues": [
-                "Virtual Edge 4.2.1"
+                "Virtual Edge 4.5.2",
+                "Virtual Edge 5.0.1"
             ],
-            "defaultValue": "Virtual Edge 4.2.1",
+            "defaultValue": "Virtual Edge 4.5.2",
             "metadata": {
                 "description": "The version of the Edge to deploy from Marketplace"
             }
@@ -51,10 +52,10 @@
                 "description": "Name of the Virtual Edge"
             }
         },
-        "SslPublicKey": {
+        "PublicKey": {
             "type": "string",
             "metadata": {
-                "description": "The Public Key for Virtual Edge Instance paired with local private key"
+                "description": "The public key for Edge instance paired with local private key"
             }
         },
         "virtualNetworkNewOrExisting": {
@@ -73,6 +74,18 @@
             "defaultValue": "AzureVNET",
             "metadata": {
               "description": "Virtual Network Name"
+            }
+        },
+        "zone": {
+            "type": "string",
+            "defaultValue": "1",
+            "allowedValues": [
+                "1",
+                "2",
+                "3"
+            ],
+            "metadata": {
+                "description": "Zone number for the Edge (only for regions that support AZs)"
             }
         },
         "vNetPrefix": {
@@ -138,36 +151,42 @@
         "subnet2Ref": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnet2Name'))]",
         "networkSecurityGroupName": "VELO_vVCE_SG",
         "sshKeyPath": "[concat('/home/azureuser/.ssh/authorized_keys')]",
-        "sshPubKey": "parameters('SslPublicKey')",
-        "cloudinit": "[concat('#cloud-config\npassword: Velocloud123\nchpasswd: { expire: False }\nssh_pwauth: True\nvelocloud:\n vce:\n  management_interface: false\n  vco: ',parameters('VCO'), '\n  activation_code: ',parameters('ActivationKey'), '\n  vco_ignore_cert_errors: ', parameters('IgnoreCertErrors'),'\n')]",
+        "sshPubKey": "parameters('PublicKey')",
+        "cloudinit": "[concat('#cloud-config\nvelocloud:\n vce:\n  management_interface: false\n  vco: ',parameters('VCO'), '\n  activation_code: ',parameters('ActivationKey'), '\n  vco_ignore_cert_errors: ', parameters('IgnoreCertErrors'),'\n')]",
         "images": {
-            "Virtual Edge 4.2.1": {
+             "Virtual Edge 4.5.2": {
                 "publisher": "vmware-inc",
                 "offer": "sol-42222-bbj",
-                "sku": "vmware_sdwan_4x",
-                "version": "4.2.1"
+                "sku": "vmware_sdwan_452"
+            },
+             "Virtual Edge 5.0.1": {
+                "publisher": "vmware-inc",
+                "offer": "sol-42222-bbj",
+                "sku": "vmware_sdwan_501x"
             }
         },
         "imageSku": "[variables('images')[parameters('EdgeVersion')].sku]",
         "imagePublisher": "[variables('images')[parameters('EdgeVersion')].publisher]",
-        "imageOffer": "[variables('images')[parameters('EdgeVersion')].offer]",
-        "imageVersion": "[variables('images')[parameters('EdgeVersion')].version]"
+        "imageOffer": "[variables('images')[parameters('EdgeVersion')].offer]"
     },
     "resources": [
         {
             "name": "[variables('virtualMachineName')]",
             "type": "Microsoft.Compute/virtualMachines",
-            "apiVersion": "2017-03-30",
+            "apiVersion": "2018-06-01",
             "location": "[resourceGroup().location]",
+            "zones": [
+                "[parameters('zone')]"
+            ],
             "plan": {
                 "publisher": "[variables('imagePublisher')]",
                 "product": "[variables('imageOffer')]",
                 "name": "[variables('imageSku')]"
             },
-            "comments": "VMware SD-WAN by VeloCloud",
+            "comments": "VMware SDWAN",
             "dependsOn": [
-                "[variables('nic1')]",
-                "[variables('nic2')]"
+                "[resourceId('Microsoft.Network/networkInterfaces/', variables('nic1'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces/', variables('nic2'))]"
             ],
             "properties": {
                 "hardwareProfile": {
@@ -176,15 +195,16 @@
                 "osProfile": {
                     "computerName": "[variables('virtualMachineName')]",
                     "adminUsername": "azureuser",
-                    "adminPassword": "Velocloud123",
+                    "adminPassword": "notallowed",
                     "customData": "[base64(variables('cloudinit'))]",
                     "linuxConfiguration": {
-                        "disablePasswordAuthentication": false,
+                        "provisionVMAgent": false,
+                        "disablePasswordAuthentication": true,
                         "ssh": {
                             "publicKeys": [
                                 {
                                 "path": "[variables('sshKeyPath')]",
-                                "keyData": "[parameters('SslPublicKey')]"
+                                "keyData": "[parameters('PublicKey')]"
                                 }
                             ]
                         }
@@ -195,7 +215,7 @@
                         "publisher": "[variables('imagePublisher')]",
                         "offer": "[variables('imageOffer')]",
                         "sku": "[variables('imageSku')]",
-                        "version": "[variables('imageVersion')]"
+                        "version": "latest"
                     },
                     "osDisk": {
                         "createOption": "FromImage"
@@ -208,13 +228,13 @@
                             "properties": {
                                 "primary": true
                             },
-                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic1'))]"
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces/', variables('nic1'))]"
                         },
                         {
                             "properties": {
                                 "primary": false
                             },
-                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic2'))]"
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces/', variables('nic2'))]"
                         }
                     ]
                 }
@@ -228,8 +248,8 @@
             "location": "[resourceGroup().location]",
             "comments": "Deploy Virtual Network",
             "dependsOn": [
-                "[variables('routeTablePublic')]",
-                "[variables('routeTablePrivate')]"
+                "[resourceId('Microsoft.Network/routeTables/', variables('routeTablePublic'))]",
+                "[resourceId('Microsoft.Network/routeTables/', variables('routeTablePrivate'))]"
             ],
             "properties": {
                 "addressSpace": {
@@ -264,10 +284,11 @@
             "type": "Microsoft.Network/networkInterfaces",
             "apiVersion": "2017-06-01",
             "location": "[resourceGroup().location]",
-            "comments": "VeloCloud GE1 - WAN.",
+            "comments": "VMware SASE vEdge GE1 - WAN.",
             "dependsOn": [
-                "[variables('networkSecurityGroupName')]",
-                "[variables('virtualNetworkName')]"
+                "[resourceId('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
+                "[resourceId('Microsoft.Network/publicIpAddresses/', variables('publicIP'))]"
             ],
             "properties": {
                 "enableIPForwarding": true,
@@ -295,10 +316,10 @@
             "type": "Microsoft.Network/networkInterfaces",
             "apiVersion": "2017-06-01",
             "location": "[resourceGroup().location]",
-            "comments": "VeloCloud GE2 - LAN.",
+            "comments": "VMware SASE vEdge GE2 - LAN.",
             "dependsOn": [
-                "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]",
-                "[variables('publicIP')]"
+                "[resourceId('Microsoft.Network/networkInterfaces/', variables('nic1'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
             ],
             "properties": {
                 "enableIPForwarding": true,
@@ -322,11 +343,17 @@
         {
             "name": "[variables('publicIP')]",
             "type": "Microsoft.Network/publicIPAddresses",
-            "apiVersion": "2017-06-01",
+            "apiVersion": "2017-08-01",
             "location": "[resourceGroup().location]",
-            "comments": "Public IP for WAN Interface GE2",
+            "comments": "Public IP for WAN Interface GE1",
+	        "sku": {
+                "name": "Standard"
+            },
+            "zones": [
+                "[parameters('zone')]"
+            ],
             "properties": {
-                "publicIPAllocationMethod": "Dynamic"
+                "publicIPAllocationMethod": "Static"
             }
         },
         {
